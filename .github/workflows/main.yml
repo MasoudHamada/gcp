@@ -27,15 +27,63 @@ jobs:
           access_token_scopes: "https://www.googleapis.com/auth/cloud-platform"
           cleanup_credentials: true
 
+      - name: Install tooling (gcloud + jq)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+
+      - name: Debug - show credentials file top (temporary, remove later)
+        # WARNING: this prints the credentials JSON file to logs; remove after debugging.
+        run: |
+          CREDS="${{ steps.auth.outputs.credentials_file_path }}"
+          echo "CREDS path: $CREDS"
+          echo "---- head of credentials file (first 20 lines) ----"
+          head -n 20 "$CREDS" || true
+        # keep this step for troubleshooting, remove once you confirm JSON type
+
       - id: "gcloud"
-        name: "gcloud and read secret"
+        name: "gcloud and read secret (ADC flow)"
+        env:
+          # ensure consistent project setting and ADC usage
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+          CLOUDSDK_CORE_PROJECT: gcp-labs-9necgia2
+          PROJECT_ID: gcp-labs-9necgia2
+          SECRET_NAME: flag_iam_lab_7
         run: |-
-          echo "creds: ${{ steps.auth.outputs.credentials_file_path }}"
-          gcloud config set project gcp-labs-9necgia2
-          # Use the generated key file
-          gcloud auth activate-service-account --key-file="${{ steps.auth.outputs.credentials_file_path }}"
-          gcloud auth list
-          # quick validation commands
-          gcloud projects list --limit=5
-          gcloud secrets list --project=gcp-labs-9necgia2
-          gcloud secrets versions access latest --secret=flag_iam_lab_7 --project=gcp-labs-9necgia2
+          set -euo pipefail
+
+          echo "Using ADC file: $GOOGLE_APPLICATION_CREDENTIALS"
+
+          # 1) Try to mint an access token from ADC (external_account JSON)
+          echo "Getting access token via 'gcloud auth application-default print-access-token'..."
+          ACCESS_TOKEN=$(gcloud auth application-default print-access-token 2>/tmp/gcloud_adc_err || true)
+
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "ERROR: Failed to get ADC access token. Dumping gcloud error log:"
+            cat /tmp/gcloud_adc_err || true
+            exit 1
+          fi
+
+          echo "Got token (len: ${#ACCESS_TOKEN}). Calling Secret Manager REST API..."
+
+          # 2) Call Secret Manager REST API and decode base64 payload
+          RESPONSE=$(curl -s -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            "https://secretmanager.googleapis.com/v1/projects/${PROJECT_ID}/secrets/${SECRET_NAME}/versions/latest:access")
+
+          echo "Raw response from Secret Manager:"
+          echo "$RESPONSE" | jq .
+
+          SECRET_BASE64=$(echo "$RESPONSE" | jq -r '.payload.data // empty')
+
+          if [ -z "$SECRET_BASE64" ]; then
+            echo "No payload.data returned (permission issue, secret missing, or wrong secret name)."
+            exit 2
+          fi
+
+          echo "Decoded secret:"
+          echo "$SECRET_BASE64" | base64 --decode || (echo "base64 decode failed" && exit 3)
+
+      - name: Cleanup / final note
+        if: always()
+        run: |
+          echo "Note: remove the Debug step once validated to avoid leaking credential structure in logs."
