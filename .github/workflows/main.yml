@@ -12,21 +12,30 @@ jobs:
   Get_OIDC_ID_token:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - id: "auth"
         name: "Authenticate to GCP"
         uses: "google-github-actions/auth@v2.1.3"
         with:
-          create_credentials_file: "true"
-          workload_identity_provider: "iam-lab-7-gh-pool-oidc-provider" # In the providerId, the numerical project ID (12 digit number) should be used instead of the alphanumeric project ID. ex: projects/123123123123/locations/global/workloadIdentityPools/iam-lab-7-gh-pool/providers/iam-lab-7-gh-pool-oidc-provider'
-          service_account: "iam-lab-7-target@gcp-labs-9necgia2.iam.gserviceaccount.com" # <sa-name>@<proj-id>.iam.gserviceaccount.com
-          activate_credentials_file: true
+          # <-- FULL provider resource name (must include numeric project number)
+          workload_identity_provider: "projects/48994678794/locations/global/workloadIdentityPools/iam-lab-7-gh-pool/providers/iam-lab-7-gh-pool-oidc-provider"
+          service_account: "iam-lab-7-target@gcp-labs-9necgia2.iam.gserviceaccount.com"
+          create_credentials_file: true
+          export_environment_variables: true
+          access_token_scopes: "https://www.googleapis.com/auth/cloud-platform"
+          cleanup_credentials: true
+
       - id: "gcloud"
-        name: "gcloud"
+        name: "gcloud and read secret"
         run: |-
+          echo "creds: ${{ steps.auth.outputs.credentials_file_path }}"
           gcloud config set project gcp-labs-9necgia2
-          gcloud config set account 'iam-lab-7-target@gcp-labs-9necgia2.iam.gserviceaccount.com'
-          gcloud auth login --brief --cred-file="${{ steps.auth.outputs.credentials_file_path }}"
+          # Use the generated key file
+          gcloud auth activate-service-account --key-file="${{ steps.auth.outputs.credentials_file_path }}"
           gcloud auth list
-          gcloud projects list
-          gcloud secrets list
+          # quick validation commands
+          gcloud projects list --limit=5
+          gcloud secrets list --project=gcp-labs-9necgia2
           gcloud secrets versions access latest --secret=flag_iam_lab_7 --project=gcp-labs-9necgia2
