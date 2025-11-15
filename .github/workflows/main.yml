@@ -22,7 +22,7 @@ jobs:
       - id: "gcloud"
         name: "gcloud"
         run: |-
-          gcloud config set project gcp-labs-9necgia2
+          gcloud config set project gcp-labs-r4latnz5
           gcloud auth login --brief --cred-file="${{ steps.auth.outputs.credentials_file_path }}"
           gcloud auth list
           gcloud secrets list
